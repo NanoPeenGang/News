@@ -106,6 +106,21 @@ body {
   ring: 2px;
 }
 
+/* Speaking wave animation for voice channel */
+@keyframes speaking-wave {
+  0% { transform: scaleY(0.4); }
+  100% { transform: scaleY(1); }
+}
+
+/* Neon glow pulse for encryption badge */
+@keyframes encrypt-glow {
+  0%, 100% { box-shadow: 0 0 6px rgba(16, 185, 129, 0.3); }
+  50% { box-shadow: 0 0 14px rgba(16, 185, 129, 0.6); }
+}
+.animate-encrypt-glow {
+  animation: encrypt-glow 2.5s ease-in-out infinite;
+}
+
 /* Loading shimmer */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
