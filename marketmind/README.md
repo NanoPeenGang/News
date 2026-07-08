@@ -79,6 +79,11 @@ All are read from `marketmind/.env` (see `.env.example` for the full annotated l
 | `WS_PORT` / `NEXT_PUBLIC_WS_URL` | Worker's Socket.IO port and the URL browsers connect to |
 | `STRIPE_SECRET_KEY` etc. | Stubbed — see `src/app/api/stripe/checkout/route.ts` for the wiring guide. Without a key, "upgrade" is simulated instantly for demos |
 | `EXPOSE_RESET_TOKENS` | Demo convenience: returns password-reset tokens in the API response (no email sender wired). Set `0` in production |
+| `BROKERAGE_ENCRYPTION_KEY` | AES-256-GCM key (64 hex chars, `openssl rand -hex 32`) for brokerage tokens at rest. Dev falls back to a key derived from `NEXTAUTH_SECRET` |
+| `SNAPTRADE_CLIENT_ID` / `SNAPTRADE_CONSUMER_KEY` | SnapTrade credentials — Robinhood portfolio data **and** trading |
+| `PLAID_CLIENT_ID` / `PLAID_SECRET` / `PLAID_ENV` | Plaid Investments credentials — read-only holdings fallback (`PLAID_ENV=sandbox` by default) |
+| `ENABLE_LIVE_TRADING` | **`false` by default.** Master switch for live order placement; portfolio sync works regardless |
+| `BROKERAGE_SYNC_SECONDS` | Worker's background portfolio-sync cadence (default 300) |
 
 ## Switching from mock to live data
 
@@ -91,6 +96,26 @@ All are read from `marketmind/.env` (see `.env.example` for the full annotated l
 3. Restart both processes. Everything — scanner, charts, quotes, paper fills — flows through the `MarketDataProvider` interface (`src/lib/marketdata/types.ts`), so no other change is needed.
 
 Notes: free API tiers are heavily rate-limited; raise `SCAN_INTERVAL_SECONDS` (e.g. 300) and consider trimming the universe in `src/lib/marketdata/mock.ts` (`MOCK_UNIVERSE` is also the default universe for live providers). Finnhub's free tier lacks candle history for some symbols — the scanner simply skips symbols with insufficient bars. To add another vendor, implement the four-method interface and register it in `src/lib/marketdata/index.ts`.
+
+## Brokerage connections (Robinhood portfolio sync + optional trading)
+
+Robinhood has no public third-party OAuth API, so MarketMind deliberately avoids unofficial/reverse-engineered Robinhood libraries (they violate Robinhood's ToS and risk account bans). Instead everything goes through official aggregators behind a swappable `BrokerageProvider` interface (`src/lib/brokerage/types.ts`), mirroring the market-data layer:
+
+| Provider | What it gives | Keys |
+|---|---|---|
+| **mock** ("Robinwood Demo") | Fake portfolio + instant fills; exercises the entire flow locally with zero keys | none |
+| **SnapTrade** (primary) | Robinhood portfolio data **and** order placement via SnapTrade's hosted connection portal — MarketMind never sees Robinhood credentials | `SNAPTRADE_CLIENT_ID`, `SNAPTRADE_CONSUMER_KEY` |
+| **Plaid Investments** (fallback) | Read-only holdings & transactions for portfolio tracking only | `PLAID_CLIENT_ID`, `PLAID_SECRET` |
+
+**Try it with the mock provider (no keys):** sign in → Settings → Brokerage Connections → Connect on "Robinwood (Demo)" → authorize on the fake portal → you land back connected, with a seeded portfolio on the **Portfolio** page (positions, day/total P&L, allocation donut, equity curve, distance to AI-detected support/resistance, AI Portfolio Health review). Signals on tickers you hold get a "You own this" badge and the AI thesis folds in your cost basis.
+
+**Getting sandbox keys:**
+- *SnapTrade:* create an account at [snaptrade.com](https://snaptrade.com) → dashboard → API keys (`clientId` + `consumerKey`). Sandbox keys work with test brokerage connections; set both env vars and the "Robinhood (via SnapTrade)" card on the Connections page becomes active. The link flow opens SnapTrade's hosted portal and returns to `/api/brokerage/callback/snaptrade`.
+- *Plaid:* create an app at [dashboard.plaid.com](https://dashboard.plaid.com) → use the **sandbox** `client_id` + secret with `PLAID_ENV=sandbox`. The adapter uses Plaid **Hosted Link** (no client-side SDK); in sandbox, link the `user_good` / `pass_good` test institution with an investment account.
+
+**Enabling live trading:** portfolio sync ships enabled; order placement is feature-flagged **off**. Set `ENABLE_LIVE_TRADING="true"` to activate the "Trade this setup" button on signal pages (Premium users with an active trading-capable connection only). Hard rules enforced server-side: every order requires the review-and-confirm step (requests without `confirmed: true` are rejected), idempotency keys prevent duplicates, order endpoints are rate-limited, a user-configurable **max daily loss** (Settings → Trading Guardrails) locks orders for the day when hit, and neither the scanner nor the AI has any code path to order submission. Filled orders are auto-logged into the Trade Journal (`source: brokerage`) so the weekly AI coaching runs on real trades (win rate, average R, revenge-trade and overtrading detection, sizing consistency).
+
+**Security:** provider tokens are AES-256-GCM encrypted at rest (`BrokerageConnection.encryptedAuth`), never returned by any API or written to logs; account numbers are stored masked (last 4 only); all brokerage API calls are server-side; Disconnect revokes the provider-side authorization and deletes every synced row. MarketMind is not a broker-dealer or investment adviser — orders are executed by the user's brokerage.
 
 ## Feature map
 

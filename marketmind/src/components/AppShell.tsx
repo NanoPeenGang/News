@@ -6,7 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Radar, Zap, ListChecks, Bot, GraduationCap, NotebookPen,
-  FlaskConical, Settings, Shield, Bell, LogOut, CreditCard, X, Menu,
+  FlaskConical, Settings, Shield, Bell, LogOut, CreditCard, X, Menu, Briefcase,
 } from "lucide-react";
 import { useLive } from "./Providers";
 import { Badge, Button, Modal, cn } from "./ui";
@@ -16,6 +16,7 @@ const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/scanner", label: "Scanner", icon: Radar },
   { href: "/signals", label: "Signals", icon: Zap },
+  { href: "/portfolio", label: "Portfolio", icon: Briefcase },
   { href: "/watchlists", label: "Watchlists", icon: ListChecks },
   { href: "/analyst", label: "AI Analyst", icon: Bot, premium: true },
   { href: "/learn", label: "Learning Center", icon: GraduationCap },
@@ -24,7 +25,7 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-const MOBILE_NAV = NAV.filter((n) => ["/dashboard", "/scanner", "/signals", "/analyst", "/learn"].includes(n.href));
+const MOBILE_NAV = NAV.filter((n) => ["/dashboard", "/scanner", "/signals", "/portfolio", "/analyst"].includes(n.href));
 
 function DisclaimerGate() {
   const [ack, setAck] = useState<boolean | null>(null);

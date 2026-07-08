@@ -44,22 +44,62 @@ export async function POST() {
   const mistakes = entries.flatMap((e) => (e.mistakes ? e.mistakes.split(",").map((m) => m.trim()) : []));
   const mistakeCounts = mistakes.reduce<Record<string, number>>((acc, m) => ({ ...acc, [m]: (acc[m] ?? 0) + 1 }), {});
 
+  // --- Real-trading behavior analysis (synced brokerage trades included) ---
+  const realTrades = entries.filter((e) => e.source === "brokerage");
+  const chronological = [...entries].sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime());
+
+  // Revenge pattern: opening a new trade within 30 min of closing a loser
+  let revengeCount = 0;
+  for (const e of chronological) {
+    const priorLoss = chronological.find(
+      (p) =>
+        p.id !== e.id &&
+        p.closedAt &&
+        (p.pnl ?? 0) < 0 &&
+        e.openedAt.getTime() - p.closedAt.getTime() > 0 &&
+        e.openedAt.getTime() - p.closedAt.getTime() < 30 * 60_000
+    );
+    if (priorLoss) revengeCount++;
+  }
+
+  // Overtrading: trades per active day
+  const dayKeys = new Set(chronological.map((e) => e.openedAt.toISOString().slice(0, 10)));
+  const tradesPerDay = dayKeys.size ? entries.length / dayKeys.size : 0;
+
+  // Sizing consistency vs the risk calculator's constant-dollar-risk model:
+  // dollar risk (|entry-stop| * qty) should be roughly constant across trades
+  const dollarRisks = entries
+    .filter((e) => e.stopLoss)
+    .map((e) => Math.abs(e.entryPrice - (e.stopLoss as number)) * e.quantity);
+  let sizingConsistency: string = "n/a (no stops logged)";
+  if (dollarRisks.length >= 3) {
+    const mean = dollarRisks.reduce((a, b) => a + b, 0) / dollarRisks.length;
+    const cv = Math.sqrt(dollarRisks.reduce((a, v) => a + (v - mean) ** 2, 0) / dollarRisks.length) / mean;
+    sizingConsistency = `${cv < 0.35 ? "consistent" : cv < 0.75 ? "uneven" : "erratic"} (risk per trade varies ${(cv * 100).toFixed(0)}% around a $${mean.toFixed(0)} average)`;
+  }
+
   const stats = {
     trades: entries.length,
+    realBrokerageTrades: realTrades.length,
     winRate: entries.length ? (wins.length / entries.length) * 100 : 0,
     totalPnl,
     avgR,
     profitFactor: grossLoss > 0 ? grossWin / grossLoss : null,
     mistakeCounts,
+    revengeCount,
+    tradesPerDay,
   };
 
-  const summary = `Closed trades: ${stats.trades}
+  const summary = `Closed trades: ${stats.trades} (${realTrades.length} synced from a real brokerage account, ${entries.length - realTrades.length} manually journaled)
 Win rate: ${stats.winRate.toFixed(1)}%
 Total P&L: ${fmtMoney(totalPnl)}
 Average R multiple: ${avgR !== null ? avgR.toFixed(2) : "n/a (no stops logged)"}
 Profit factor: ${stats.profitFactor !== null ? stats.profitFactor?.toFixed(2) : "n/a"}
 Rule-violation tags: ${Object.entries(mistakeCounts).map(([m, c]) => `${m} x${c}`).join(", ") || "none tagged"}
-Recent trades: ${entries.slice(0, 15).map((e) => `${e.symbol} ${e.side} ${e.rMultiple !== null ? `${e.rMultiple.toFixed(1)}R` : fmtMoney(e.pnl ?? 0)}${e.mistakes ? ` [${e.mistakes}]` : ""}`).join("; ")}`;
+Possible revenge trades (opened <30min after a loss): ${revengeCount}
+Trading frequency: ${tradesPerDay.toFixed(1)} trades per active day${tradesPerDay > 5 ? " (high — check for overtrading)" : ""}
+Position-sizing consistency vs constant-dollar-risk model: ${sizingConsistency}
+Recent trades: ${entries.slice(0, 15).map((e) => `${e.symbol} ${e.side} ${e.rMultiple !== null ? `${e.rMultiple.toFixed(1)}R` : fmtMoney(e.pnl ?? 0)}${e.source === "brokerage" ? " (real)" : ""}${e.mistakes ? ` [${e.mistakes}]` : ""}`).join("; ")}`;
 
   const content = await generateCoachingReport(summary, session.user.id);
   const report = await prisma.coachingReport.create({

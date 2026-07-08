@@ -15,6 +15,7 @@ import { PrismaClient, SignalStatus, Prisma } from "@prisma/client";
 import { getMarketDataProvider, Quote } from "../lib/marketdata";
 import { evaluateSymbol, currentSessionBars } from "../lib/scanner";
 import { generateThesis } from "../lib/ai";
+import { syncConnection } from "../lib/brokerage/sync";
 
 const prisma = new PrismaClient();
 const provider = getMarketDataProvider();
@@ -233,6 +234,32 @@ async function scan() {
   }
 }
 
+// ---------------- brokerage portfolio sync ----------------
+
+const BROKERAGE_SYNC_SECONDS = Math.max(60, parseInt(process.env.BROKERAGE_SYNC_SECONDS ?? "300"));
+
+async function syncBrokerages() {
+  try {
+    const connections = await prisma.brokerageConnection.findMany({
+      where: { status: "ACTIVE" },
+      select: { id: true, userId: true, provider: true },
+    });
+    let ok = 0;
+    for (const conn of connections) {
+      const result = await syncConnection(prisma, conn.id);
+      if (result.ok) {
+        ok++;
+        io.to(`user:${conn.userId}`).emit("portfolio:synced", { connectionId: conn.id, at: new Date().toISOString() });
+      }
+    }
+    if (connections.length > 0) {
+      console.log(`[brokerage-sync] ${new Date().toISOString()} synced ${ok}/${connections.length} connections`);
+    }
+  } catch (e) {
+    console.error("brokerage sync loop failed:", e);
+  }
+}
+
 // ---------------- boot ----------------
 
 httpServer.listen(WS_PORT, () => {
@@ -242,5 +269,7 @@ httpServer.listen(WS_PORT, () => {
 
 void priceTick();
 void scan();
+void syncBrokerages();
 setInterval(priceTick, TICK_SECONDS * 1000);
 setInterval(scan, SCAN_SECONDS * 1000);
+setInterval(syncBrokerages, BROKERAGE_SYNC_SECONDS * 1000);

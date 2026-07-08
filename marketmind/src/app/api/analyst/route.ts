@@ -51,7 +51,11 @@ export async function POST(req: Request) {
       const snap = computeSnapshot(bars, currentSessionBars(bars), {
         prevClose: quote.prevClose, open: quote.open, volume: quote.volume, avgVolume: quote.avgVolume,
       });
-      context = `Live technicals for ${sym}:\n${JSON.stringify({ quote, technicals: snap }, null, 1)}`;
+      const held = await prisma.brokeragePosition.findFirst({
+        where: { symbol: sym, connection: { userId: session.user.id, status: { not: "DISCONNECTED" } } },
+      });
+      const position = held ? { quantity: held.quantity, avgCost: held.avgCost } : null;
+      context = `Live technicals for ${sym}:\n${JSON.stringify({ quote, technicals: snap, usersExistingPosition: position }, null, 1)}`;
     }
   } catch (e) {
     console.error("context assembly failed:", e);

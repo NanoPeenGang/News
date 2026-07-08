@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Info, X } from "lucide-react";
 import { fmtPrice } from "@/lib/format";
 
@@ -213,8 +214,12 @@ function renderMarkdown(md: string): string {
 }
 
 export function Modal({ open, onClose, children, closable = true }: { open: boolean; onClose: () => void; children: React.ReactNode; closable?: boolean }) {
-  if (!open) return null;
-  return (
+  // Portal to <body>: ancestors with backdrop-filter (glass cards) create new
+  // containing blocks that would otherwise trap this fixed overlay behind them
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!open || !mounted) return null;
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closable ? onClose : undefined} />
       <div className="glass animate-slide-up relative max-h-[85vh] w-full max-w-lg overflow-y-auto p-6">
@@ -225,7 +230,8 @@ export function Modal({ open, onClose, children, closable = true }: { open: bool
         )}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

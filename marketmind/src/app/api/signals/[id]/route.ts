@@ -22,9 +22,23 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
   const signal = await prisma.signal.findUnique({ where: { id: params.id } });
   if (!signal) return NextResponse.json({ error: "Signal not found" }, { status: 404 });
 
+  // Signal ↔ portfolio awareness: fold the user's existing position into the thesis
+  const held = await prisma.brokeragePosition.findFirst({
+    where: { symbol: signal.symbol, connection: { userId: session.user.id, status: { not: "DISCONNECTED" } } },
+  });
+  let userPosition: { quantity: number; avgCost: number; unrealizedPnlPercent: number } | undefined;
+  if (held) {
+    userPosition = {
+      quantity: held.quantity,
+      avgCost: held.avgCost,
+      unrealizedPnlPercent: held.avgCost > 0 ? ((signal.priceAtScan - held.avgCost) / held.avgCost) * 100 : 0,
+    };
+  }
+
   const tech = (signal.technicals ?? {}) as Partial<TechnicalSnapshot> & { reasons?: string[] };
   const { thesis, risks, proNotes, source } = await generateThesis(
     {
+      userPosition,
       symbol: signal.symbol,
       setupType: signal.setupType,
       direction: signal.direction,

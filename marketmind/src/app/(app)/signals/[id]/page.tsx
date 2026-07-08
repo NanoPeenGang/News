@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, BookmarkPlus, FlaskConical, RefreshCw, Sparkles } from "lucide-react";
-import { useFetch } from "@/components/hooks";
+import { useFetch, useHoldings } from "@/components/hooks";
 import { useLive, useLiveQuote } from "@/components/Providers";
 import { PriceChart, ChartBar } from "@/components/PriceChart";
 import { RiskCalculator } from "@/components/RiskCalculator";
+import { TradeSetupButton } from "@/components/OrderTicket";
 import { Badge, Button, Card, ConfidenceMeter, InfoTip, Markdown, NumberTicker, SectionTitle, Skeleton, StatusPill, cn } from "@/components/ui";
 import { SETUP_LABELS, fmtPrice, timeAgo } from "@/lib/format";
 
@@ -41,6 +42,8 @@ export default function SignalDetailPage() {
   const { data, loading, refresh } = useFetch<{ signal: SignalDetail }>(`/api/signals/${id}`);
   const signal = data?.signal;
   const quote = useLiveQuote(signal?.symbol);
+  const holdings = useHoldings();
+  const held = signal ? holdings[signal.symbol] : undefined;
   const { lastSignalUpdate } = useLive();
   const [bars, setBars] = useState<ChartBar[]>([]);
   const [regenerating, setRegenerating] = useState(false);
@@ -129,6 +132,11 @@ export default function SignalDetailPage() {
               </Link>
               <Badge tone={isLong ? "green" : "red"}>{signal.direction}</Badge>
               <StatusPill status={signal.status} />
+              {held && (
+                <Badge tone="blue" className="whitespace-nowrap">
+                  You own this · {held.quantity} sh @ {fmtPrice(held.avgCost)}
+                </Badge>
+              )}
             </div>
             <div className="mt-0.5 text-sm text-mist-400">
               {SETUP_LABELS[signal.setupType]} · flagged {timeAgo(signal.createdAt)} at ${fmtPrice(signal.priceAtScan)}
@@ -229,6 +237,7 @@ export default function SignalDetailPage() {
           <Card>
             <SectionTitle>Actions</SectionTitle>
             <div className="space-y-2">
+              <TradeSetupButton signal={signal} />
               <Button onClick={logToJournal} variant="ghost" className="flex w-full items-center justify-center gap-2">
                 <BookmarkPlus size={15} /> Log to Journal
               </Button>

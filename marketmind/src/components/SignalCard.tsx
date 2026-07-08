@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
-import { Badge, ConfidenceMeter, InfoTip, StatusPill, NumberTicker, cn } from "./ui";
+import { Badge, ConfidenceMeter, StatusPill, NumberTicker, cn } from "./ui";
 import { useLiveQuote, LiveSignal } from "./Providers";
+import { useHoldings } from "./hooks";
 import { SETUP_LABELS, fmtPrice, timeAgo } from "@/lib/format";
 
 export function SignalCard({ signal, compact = false }: { signal: LiveSignal; compact?: boolean }) {
   const quote = useLiveQuote(signal.symbol);
+  const holdings = useHoldings();
+  const held = holdings[signal.symbol];
   const isLong = signal.direction === "LONG";
 
   return (
@@ -24,6 +27,7 @@ export function SignalCard({ signal, compact = false }: { signal: LiveSignal; co
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-bold tracking-tight text-mist-100">{signal.symbol}</span>
               <Badge tone={isLong ? "green" : "red"}>{signal.direction}</Badge>
+              {held && <Badge tone="blue" className="whitespace-nowrap">You own this · {held.quantity} sh</Badge>}
             </div>
             <div className="mt-0.5 text-xs text-mist-400">
               {SETUP_LABELS[signal.setupType] ?? signal.setupType} · {timeAgo(signal.createdAt)}

@@ -15,6 +15,7 @@ Hard rules you must always follow:
 - Never guarantee outcomes. Describe probabilities and conditions ("setup conditions are met", "historically this pattern..."), never certainties.
 - Always reinforce risk management: position sizing, stop-loss discipline, and never risking more than a small percentage of an account on one trade.
 - If asked "should I buy X?", explain what the data shows and how a trader would evaluate it themselves, and remind them this is not financial advice.
+- You may explain what an order ticket contains (side, quantity, limit, stop, targets) but you must NEVER submit an order, never claim you can submit one, and never urge the user to submit one. Order placement is a deliberate human decision that happens only through the review-and-confirm flow.
 - Be concise, plain-English, and educational. Explain jargon when you use it.`;
 
 function client(): Anthropic | null {
@@ -91,6 +92,8 @@ interface ThesisInput {
   target2: number;
   snapshot: Partial<TechnicalSnapshot>;
   reasons: string[];
+  /** Present when the user already holds this ticker in a linked brokerage. */
+  userPosition?: { quantity: number; avgCost: number; unrealizedPnlPercent: number };
 }
 
 function fallbackThesis(s: ThesisInput): { thesis: string; risks: string; proNotes: string } {
@@ -105,9 +108,17 @@ function fallbackThesis(s: ThesisInput): { thesis: string; risks: string; proNot
         : "short-term EMAs are stacked bearishly (9 under 21)"
       : "";
 
+  const positionTxt = s.userPosition
+    ? `\n\n**Your existing position:** you hold ${s.userPosition.quantity} shares at an average cost of $${s.userPosition.avgCost.toFixed(2)} (${s.userPosition.unrealizedPnlPercent >= 0 ? "+" : ""}${s.userPosition.unrealizedPnlPercent.toFixed(1)}% unrealized). ${
+        s.direction === "LONG"
+          ? "This setup would ADD to that exposure — adding concentrates risk in one name, so a smaller add (or none) keeps total position risk inside your per-trade budget. Some traders instead use a setup like this to review the stop on the shares they already own."
+          : "This is a bearish setup on a name you own — treat it primarily as information about your existing position (is your stop still valid?) rather than a reason to open an opposing trade."
+      }`
+    : "";
+
   const thesis = `**Setup conditions met** for a potential ${dirWord} move in ${s.symbol}. The scanner flagged ${desc}. ${[rsiTxt, volTxt, trendTxt].filter(Boolean).join(", ")}.
 
-What the chart shows: ${s.reasons.join("; ")}.
+What the chart shows: ${s.reasons.join("; ")}.${positionTxt}
 
 **What confirms it:** continued ${s.direction === "LONG" ? "buying" : "selling"} pressure holding price ${s.direction === "LONG" ? "above" : "below"} the entry zone (${s.entryLow.toFixed(2)}–${s.entryHigh.toFixed(2)}) with volume staying elevated.
 
@@ -297,4 +308,80 @@ ${movedStop || oversized || chased ? "The tags in your journal point to specific
 ${habits.slice(0, 3).map((h, i) => `${i + 1}. ${h}`).join("\n")}
 
 *Built-in coaching engine. Add an ANTHROPIC_API_KEY for deeper AI-personalized reports. Educational content, not financial advice.*`;
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio Health review (brokerage-connected accounts)
+// ---------------------------------------------------------------------------
+
+export interface PortfolioHealthInput {
+  riskProfile: string | null;
+  equity: number;
+  cashPercent: number;
+  positions: { symbol: string; sector: string; weightPercent: number; unrealizedPnlPercent: number }[];
+  sectorWeights: { sector: string; percent: number }[];
+}
+
+export async function generatePortfolioHealth(input: PortfolioHealthInput, userId: string): Promise<string> {
+  const system = `Review this portfolio's health for an individual trader. Sections (markdown): "Concentration risk" (single-name and sector weights), "Correlation & diversification" (holdings that move together, e.g. same sector), "Alignment with risk profile" (their stated profile vs what the book implies), and "2-3 concrete observations to consider". Descriptive and educational only — never tell them to buy or sell anything specific.`;
+  const prompt = JSON.stringify(input, null, 1);
+  const out = await callClaude("portfolio-health", system, prompt, userId, 1200);
+  if (out) return out;
+  const built = builtinPortfolioHealth(input);
+  await audit("portfolio-health", prompt, built, userId, "builtin-fallback");
+  return built;
+}
+
+function builtinPortfolioHealth(input: PortfolioHealthInput): string {
+  const top = input.positions[0];
+  const topSector = input.sectorWeights.filter((s) => s.sector !== "Cash")[0];
+  const sameSectorCount = topSector ? input.positions.filter((p) => p.sector === topSector.sector).length : 0;
+  const profile = input.riskProfile ?? "unset";
+
+  const concentrationNotes: string[] = [];
+  if (top && top.weightPercent > 25)
+    concentrationNotes.push(
+      `**${top.symbol} is ${top.weightPercent.toFixed(0)}% of the account.** A single-name weight above ~20–25% means one earnings report or headline moves your whole equity curve. Professionals typically cap single positions at 10–20% for exactly that reason.`
+    );
+  else if (top)
+    concentrationNotes.push(
+      `Largest position ${top.symbol} at ${top.weightPercent.toFixed(0)}% — within the range most risk frameworks consider manageable.`
+    );
+  if (topSector && topSector.percent > 40)
+    concentrationNotes.push(
+      `**${topSector.sector} is ${topSector.percent.toFixed(0)}% of the book.** Sector concentration behaves like one big position when the sector trades as a bloc.`
+    );
+
+  const corr =
+    sameSectorCount >= 3
+      ? `You hold ${sameSectorCount} names in ${topSector?.sector}. These tend to be highly correlated — in a sector-wide drawdown they will likely fall together, so your effective diversification is lower than the position count suggests.`
+      : `No obvious correlation cluster: holdings are spread across ${input.sectorWeights.filter((s) => s.sector !== "Cash").length} sectors.`;
+
+  const alignment =
+    profile === "conservative"
+      ? input.cashPercent < 15 || (top?.weightPercent ?? 0) > 25
+        ? `Your stated profile is **conservative**, but the book carries ${input.cashPercent.toFixed(0)}% cash and a ${top?.weightPercent.toFixed(0) ?? 0}% top position — that mix reads more aggressive than the label. Worth reconciling deliberately.`
+        : `Cash buffer (${input.cashPercent.toFixed(0)}%) and position sizing are broadly consistent with a conservative profile.`
+      : profile === "aggressive"
+        ? `Stated profile is **aggressive** — concentration is a choice here, not an accident, but the same math applies: know what a 30% drawdown in the top holding does to the account.`
+        : `Risk profile is **${profile}**. Set it in Settings to make this review sharper.`;
+
+  return `## Portfolio Health Review
+
+### Concentration risk
+${concentrationNotes.map((n) => `- ${n}`).join("\n")}
+- Cash buffer: ${input.cashPercent.toFixed(1)}% of equity.
+
+### Correlation & diversification
+${corr}
+
+### Alignment with risk profile
+${alignment}
+
+### Observations to consider
+1. Rebalancing is a risk decision, not a market call — if any single name exceeds your comfort weight, trimming back to plan is process, not prediction.
+2. Correlated holdings deserve a combined mental "position size" — size the *cluster*, not each name in isolation.
+3. Revisit this review after big fills; concentration drifts silently as winners grow.
+
+*Built-in analysis engine (add an ANTHROPIC_API_KEY for a deeper AI review). Educational analysis only — not financial advice.*`;
 }

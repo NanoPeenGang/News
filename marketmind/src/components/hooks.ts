@@ -69,3 +69,44 @@ export function useFetch<T>(url: string | null) {
 
   return { data, error, loading, refresh };
 }
+
+// ---------------- Brokerage holdings (for "You own this" badges) ----------------
+
+export interface Holding {
+  quantity: number;
+  avgCost: number;
+}
+
+let holdingsCache: { data: Record<string, Holding>; at: number } | null = null;
+let holdingsInflight: Promise<Record<string, Holding>> | null = null;
+
+async function fetchHoldings(): Promise<Record<string, Holding>> {
+  if (holdingsCache && Date.now() - holdingsCache.at < 60_000) return holdingsCache.data;
+  if (!holdingsInflight) {
+    holdingsInflight = fetch("/api/portfolio/holdings")
+      .then((r) => (r.ok ? r.json() : { holdings: {} }))
+      .then((d) => {
+        holdingsCache = { data: d.holdings ?? {}, at: Date.now() };
+        holdingsInflight = null;
+        return holdingsCache.data;
+      })
+      .catch(() => {
+        holdingsInflight = null;
+        return {};
+      });
+  }
+  return holdingsInflight;
+}
+
+/** Synced brokerage holdings, cached for a minute and shared across components. */
+export function useHoldings(): Record<string, Holding> {
+  const [holdings, setHoldings] = useState<Record<string, Holding>>(holdingsCache?.data ?? {});
+  useEffect(() => {
+    let alive = true;
+    void fetchHoldings().then((h) => alive && setHoldings(h));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return holdings;
+}
