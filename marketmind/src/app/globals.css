@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+body {
+  @apply bg-ink-900 text-mist-200 antialiased;
+  background-image: radial-gradient(1200px 600px at 80% -10%, rgba(45, 212, 191, 0.05), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(59, 130, 246, 0.04), transparent 60%);
+}
+
+/* Tabular figures everywhere numbers appear */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Glass card */
+.glass {
+  @apply rounded-xl border border-white/[0.06] bg-ink-850/70 shadow-card backdrop-blur-md;
+}
+
+.glass-hover {
+  @apply transition-all duration-200 hover:border-white/[0.12] hover:bg-ink-800/80;
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  @apply animate-shimmer rounded-md bg-gradient-to-r from-ink-700/40 via-ink-600/50 to-ink-700/40;
+  background-size: 200% 100%;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-ink-600;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-ink-500;
+}
+
+/* Simple markdown rendering */
+.prose-mm {
+  @apply text-sm leading-relaxed text-mist-200;
+}
+.prose-mm h1,
+.prose-mm h2,
+.prose-mm h3 {
+  @apply mb-2 mt-5 font-semibold text-mist-100 first:mt-0;
+}
+.prose-mm h2 {
+  @apply text-base;
+}
+.prose-mm h3 {
+  @apply text-sm;
+}
+.prose-mm p {
+  @apply mb-3;
+}
+.prose-mm ul,
+.prose-mm ol {
+  @apply mb-3 ml-5 list-disc space-y-1;
+}
+.prose-mm ol {
+  @apply list-decimal;
+}
+.prose-mm strong {
+  @apply font-semibold text-mist-100;
+}
+.prose-mm code {
+  @apply rounded bg-ink-700/60 px-1 py-0.5 font-mono text-xs;
+}
+
+/* Focus rings */
+.focus-ring {
+  @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-glow/60;
+}
+
+input,
+select,
+textarea {
+  @apply focus:outline-none focus:ring-2 focus:ring-teal-glow/40;
+}

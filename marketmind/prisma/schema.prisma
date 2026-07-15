@@ -1,0 +1,450 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  FREE
+  PREMIUM
+  ADMIN
+}
+
+enum SignalDirection {
+  LONG
+  SHORT
+}
+
+enum SignalStatus {
+  WAITING
+  ENTRY_ACTIVE
+  TARGET1_HIT
+  TARGET2_HIT
+  STOPPED_OUT
+  EXPIRED
+}
+
+enum SetupType {
+  MOMENTUM_BREAKOUT
+  VWAP_RECLAIM
+  OVERSOLD_BOUNCE
+  GAP_AND_GO
+  UNUSUAL_VOLUME
+  EMA_CROSSOVER
+}
+
+enum LessonLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+// ---------- Auth ----------
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  image          String?
+  passwordHash   String?
+  role           Role      @default(FREE)
+  createdAt      DateTime  @default(now())
+  resetToken     String?
+  resetTokenExp  DateTime?
+  // Trading guardrails & profile
+  maxDailyLoss   Float? // dollar cap; live-order buttons lock for the day when hit
+  riskProfile    String? // conservative | moderate | aggressive
+
+  accounts        Account[]
+  sessions        Session[]
+  watchlists      Watchlist[]
+  journalEntries  JournalEntry[]
+  lessonProgress  LessonProgress[]
+  paperAccount    PaperAccount?
+  alertPrefs      AlertPreference?
+  alerts          Alert[]
+  coachingReports CoachingReport[]
+  chatMessages    ChatMessage[]
+  brokerageConnections BrokerageConnection[]
+  brokerageOrders      BrokerageOrder[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------- Watchlists ----------
+
+model Watchlist {
+  id        String          @id @default(cuid())
+  userId    String
+  name      String
+  createdAt DateTime        @default(now())
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WatchlistItem[]
+}
+
+model WatchlistItem {
+  id          String    @id @default(cuid())
+  watchlistId String
+  symbol      String
+  addedAt     DateTime  @default(now())
+  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, symbol])
+}
+
+// ---------- Signals ----------
+
+model Signal {
+  id          String          @id @default(cuid())
+  symbol      String
+  setupType   SetupType
+  direction   SignalDirection
+  status      SignalStatus    @default(WAITING)
+  confidence  Int // 0-100 "setup conditions score", probabilistic language only
+  entryLow    Float
+  entryHigh   Float
+  stopLoss    Float
+  target1     Float // 1:2 R/R
+  target2     Float // 1:3 R/R
+  priceAtScan Float
+  atr         Float
+  rsi         Float?
+  relVolume   Float?
+  gapPercent  Float?
+  vwap        Float?
+  technicals  Json? // full indicator snapshot at scan time
+  thesis      String?  @db.Text // AI-generated trade thesis
+  risks       String?  @db.Text
+  proNotes    String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime?
+
+  events   SignalEvent[]
+  journals JournalEntry[]
+
+  @@index([symbol])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SignalEvent {
+  id        String       @id @default(cuid())
+  signalId  String
+  fromState SignalStatus?
+  toState   SignalStatus
+  price     Float?
+  note      String?
+  createdAt DateTime     @default(now())
+  signal    Signal       @relation(fields: [signalId], references: [id], onDelete: Cascade)
+
+  @@index([signalId])
+}
+
+// ---------- Alerts ----------
+
+model AlertPreference {
+  id             String  @id @default(cuid())
+  userId         String  @unique
+  entryZone      Boolean @default(true)
+  stopThreatened Boolean @default(true)
+  targetHit      Boolean @default(true)
+  browserPush    Boolean @default(false)
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Alert {
+  id        String   @id @default(cuid())
+  userId    String
+  signalId  String?
+  symbol    String
+  kind      String // ENTRY_ZONE | STOP_THREAT | TARGET_HIT | INFO
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+}
+
+// ---------- Education ----------
+
+model Lesson {
+  id          String      @id @default(cuid())
+  slug        String      @unique
+  title       String
+  level       LessonLevel
+  order       Int
+  summary     String
+  content     String      @db.Text // markdown
+  minutes     Int         @default(8)
+  premiumOnly Boolean     @default(false)
+  progress    LessonProgress[]
+}
+
+model LessonProgress {
+  id          String    @id @default(cuid())
+  userId      String
+  lessonId    String
+  completedAt DateTime?
+  startedAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson      Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+}
+
+// ---------- Journal & Coaching ----------
+
+model JournalEntry {
+  id         String    @id @default(cuid())
+  userId     String
+  signalId   String?
+  source     String    @default("manual") // manual | signal | brokerage
+  symbol     String
+  side       TradeSide
+  entryPrice Float
+  exitPrice  Float?
+  quantity   Float
+  stopLoss   Float?
+  target     Float?
+  pnl        Float?
+  rMultiple  Float?
+  notes      String?   @db.Text
+  mistakes   String? // comma-separated tags e.g. "moved-stop,oversized"
+  openedAt   DateTime  @default(now())
+  closedAt   DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  signal     Signal?   @relation(fields: [signalId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+model CoachingReport {
+  id        String   @id @default(cuid())
+  userId    String
+  content   String   @db.Text // markdown
+  stats     Json?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------- Paper trading ----------
+
+model PaperAccount {
+  id            String          @id @default(cuid())
+  userId        String          @unique
+  startBalance  Float           @default(100000)
+  cash          Float           @default(100000)
+  createdAt     DateTime        @default(now())
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions     PaperPosition[]
+  trades        PaperTrade[]
+}
+
+model PaperPosition {
+  id        String       @id @default(cuid())
+  accountId String
+  symbol    String
+  quantity  Float
+  avgPrice  Float
+  account   PaperAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, symbol])
+}
+
+model PaperTrade {
+  id        String       @id @default(cuid())
+  accountId String
+  symbol    String
+  side      TradeSide
+  quantity  Float
+  price     Float
+  pnl       Float? // realized P&L for closing trades
+  signalId  String?
+  createdAt DateTime     @default(now())
+  account   PaperAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+// ---------- AI ----------
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  role      String // user | assistant
+  content   String   @db.Text
+  context   String? // ticker / signal id the question was about
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model AiAuditLog {
+  id        String   @id @default(cuid())
+  kind      String // thesis | chat | briefing | coaching | lesson
+  userId    String?
+  model     String
+  prompt    String   @db.Text
+  output    String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([kind, createdAt])
+}
+
+model DailyBriefing {
+  id        String   @id @default(cuid())
+  date      String // YYYY-MM-DD
+  session   String // premarket | postmarket
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@unique([date, session])
+}
+
+// ---------- Brokerage connections (SnapTrade / Plaid / mock) ----------
+
+enum BrokerageConnStatus {
+  ACTIVE
+  EXPIRED
+  DISCONNECTED
+}
+
+enum BrokerageOrderStatus {
+  PENDING
+  FILLED
+  CANCELED
+  REJECTED
+}
+
+model BrokerageConnection {
+  id            String              @id @default(cuid())
+  userId        String
+  provider      String // mock | snaptrade | plaid
+  status        BrokerageConnStatus @default(ACTIVE)
+  institution   String // e.g. "Robinhood"
+  accountMask   String // last 4 only — full account numbers are never stored
+  encryptedAuth String              @db.Text // AES-256-GCM provider tokens; never logged
+  supportsTrading Boolean           @default(false)
+  cash          Float               @default(0)
+  buyingPower   Float               @default(0)
+  equity        Float               @default(0)
+  lastSyncAt    DateTime?
+  createdAt     DateTime            @default(now())
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions     BrokeragePosition[]
+  orders        BrokerageOrder[]
+  activities    BrokerageActivity[]
+  snapshots     PortfolioSnapshot[]
+
+  @@index([userId])
+}
+
+model BrokeragePosition {
+  id           String              @id @default(cuid())
+  connectionId String
+  symbol       String
+  quantity     Float
+  avgCost      Float
+  syncedAt     DateTime            @default(now())
+  connection   BrokerageConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, symbol])
+}
+
+model BrokerageOrder {
+  id              String               @id @default(cuid())
+  connectionId    String
+  userId          String
+  providerOrderId String?
+  idempotencyKey  String
+  signalId        String?
+  symbol          String
+  side            TradeSide
+  orderType       String // LIMIT | MARKET
+  quantity        Float
+  limitPrice      Float?
+  stopLoss        Float?
+  takeProfit      Float?
+  status          BrokerageOrderStatus @default(PENDING)
+  fillPrice       Float?
+  journaled       Boolean              @default(false)
+  placedAt        DateTime             @default(now())
+  filledAt        DateTime?
+  connection      BrokerageConnection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, placedAt])
+}
+
+model BrokerageActivity {
+  id           String              @id @default(cuid())
+  connectionId String
+  externalId   String // provider-side id for dedupe
+  type         String // FILL | DIVIDEND | DEPOSIT | WITHDRAWAL | OTHER
+  symbol       String?
+  quantity     Float?
+  price        Float?
+  amount       Float?
+  description  String
+  occurredAt   DateTime
+  connection   BrokerageConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalId])
+  @@index([connectionId, occurredAt])
+}
+
+model PortfolioSnapshot {
+  id           String              @id @default(cuid())
+  connectionId String
+  equity       Float
+  cash         Float
+  createdAt    DateTime            @default(now())
+  connection   BrokerageConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, createdAt])
+}
